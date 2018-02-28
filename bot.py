@@ -95,7 +95,6 @@ if __name__ == "__main__":
             print('Buy order not filled.. Will cancel and try to buy again')
             cancelAllOrders()
             PRICE_BOUGHT, AMOUNT_BOUGHT=setBuyOrderWithRetry(MARKET, BTC_TRADE, BUY_SAFETY_RATE)
-            sleep(2)
 
         print("Buy order FILLED! Bought {} of coins".format(AMOUNT_BOUGHT))
 
