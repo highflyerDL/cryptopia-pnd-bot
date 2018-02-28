@@ -1,6 +1,7 @@
 import json
 from api import Api
 from time import sleep
+import sys
 
 # Get these from (link here)
 def get_secret(secret_file):
@@ -21,13 +22,14 @@ def isOrderFilled(market):
 
 def setBuyOrder(market, amount, buy_safety_rate):
     success, err=cryptopia.get_market(market)
-    ask_price = success['AskPrice']*buy_safety_rate
+    ask_price = success['AskPrice']
+    buy_price = ask_price*buy_safety_rate
     print('Trade for market {} has ask price {}'.format(market, ask_price))
-    coin_amount = float(amount)/ask_price
-    success, err=cryptopia.submit_trade(market, "Buy", ask_price, coin_amount)
-    print('Set buy order at {} to buy {} of {} with {} BTC'.format(ask_price, coin_amount, market, amount))
+    coin_amount = float(amount)/buy_price
+    success, err=cryptopia.submit_trade(market, "Buy", buy_price, coin_amount)
+    print('With safety rate {}, set buy order at {} to buy {} of {} with {} BTC'.format(buy_safety_rate, buy_price, coin_amount, market, amount))
     if err == None:
-        return ask_price, coin_amount
+        return buy_price, coin_amount
     else:
         raise ValueError(err)
 
@@ -60,36 +62,63 @@ def setSellOrder(market, price, amount):
     else:
         raise ValueError(err)
 
+def cancelAllOrders():
+    success, err = cryptopia.cancel_trade("All", None, None)
+    if err == None:
+        print('Cancelled all orders')
+        return True
+    else:
+        raise ValueError(err)
+
 def getBalance(coin):
     success, err = cryptopia.get_balance(coin)
     return success["Available"]
 
 if __name__ == "__main__":
     # inputs
-    BTC_BALANCE = getBalance("BTC")
-    print('BTC available balance is {}'.format(BTC_BALANCE))
-    BTC_TRADE = input("How much BTC to trade ?")
-    PROFIT_RATE = input("How much profit do u want ? E.g: 40, 30,..")
-    PROFIT_FINAL_RATE = 1+int(PROFIT_RATE)/100
-    INPUT_BUY_SAFETY_RATE = input("Bot will buy with askPrice*(1+X/100) to make sure buy order gets filled immediately. How much should that rate be ?Eg 0,10,15..")
-    BUY_SAFETY_RATE = 1+int(INPUT_BUY_SAFETY_RATE)/100
-    COIN = input("What coin to trade ?")
-    MARKET = "{}_BTC".format(COIN)
+    MARKET=''
+    COIN=''
+    AMOUNT_BOUGHT=0
+    try:
+        BTC_BALANCE = getBalance("BTC")
+        print('BTC available balance is {}'.format(BTC_BALANCE))
+        BTC_TRADE = input("How much BTC to trade ?")
+        PROFIT_RATE = input("How much profit do u want ? E.g: 40, 30,..")
+        PROFIT_FINAL_RATE = 1+int(PROFIT_RATE)/100
+        INPUT_BUY_SAFETY_RATE = input("Bot will buy with askPrice*(1+X/100) to make sure buy order gets filled immediately. How much should that rate be ?Eg 0,10,15..")
+        BUY_SAFETY_RATE = 1+int(INPUT_BUY_SAFETY_RATE)/100
+        COIN = input("What coin to trade ?")
+        MARKET = "{}_BTC".format(COIN)
 
-    PRICE_BOUGHT, AMOUNT_BOUGHT=setBuyOrderWithRetry(MARKET, BTC_TRADE, BUY_SAFETY_RATE)
+        PRICE_BOUGHT, AMOUNT_BOUGHT=setBuyOrderWithRetry(MARKET, BTC_TRADE, BUY_SAFETY_RATE)
+        while not isOrderFilled(MARKET):
+            print('Buy order not filled.. Will cancel and try to buy again')
+            cancelAllOrders()
+            PRICE_BOUGHT, AMOUNT_BOUGHT=setBuyOrderWithRetry(MARKET, BTC_TRADE, BUY_SAFETY_RATE)
+            sleep(2)
 
-    while not isOrderFilled(MARKET):
-        print("Buy order is not filled.. wait 0.5s")
-        sleep(0.5)
-    print("Buy order FILLED! Bought {} of coins".format(AMOUNT_BOUGHT))
+        print("Buy order FILLED! Bought {} of coins".format(AMOUNT_BOUGHT))
 
-    setSellOrderWithRetry(MARKET, PRICE_BOUGHT*PROFIT_FINAL_RATE, AMOUNT_BOUGHT)
+        setSellOrderWithRetry(MARKET, PRICE_BOUGHT*PROFIT_FINAL_RATE, AMOUNT_BOUGHT)
 
-    while not isOrderFilled(MARKET):
-        print("Sell order is not filled.. wait 0.5s")
-        sleep(0.5)
+        while not isOrderFilled(MARKET):
+            print("Sell order is not filled.. wait 0.5s")
+            sleep(0.5)
 
-    print("Sell order FILLED! Congrats! P&D succeeded")
-
-
+        print("Sell order FILLED! Congrats! P&D succeeded")
+    except KeyboardInterrupt:
+        activated=input('Want to activate stop loss ? BOT will try to sell continuously. (y/n)')
+        if activated == 'y':
+            while True:
+                cancelAllOrders()
+                balance = getBalance(COIN)
+                if balance > 0.0005:
+                    success, err=cryptopia.get_market(MARKET)
+                    ask_price = success['BidPrice']
+                    setSellOrderWithRetry(MARKET, ask_price, balance)
+                    sleep(0.5)
+                else:
+                    break
+            print("Sell order FILLED!")
+        sys.exit()
 
